@@ -116,8 +116,9 @@ The engine headers under `app/src/main/cpp/engine/` are vendored from the deskto
   The app itself also runs on-device (the screenshots above are a real, replayed session).
 - **Hardware, bench-tested:** the engine was run against a **real Tactrix OpenPort 2.0** (firmware 1.17.4877) from a
   desktop over its serial port with `tools/op2-cli` (same engine + the same vendored `op2lib/op2.c`): the adapter
-  opened, the 500 kbit/s CAN channel came up and the VIN request went out on the real hardware. On the bench there is
-  no car, so there is no ECU to answer.
+  opened, the 500 kbit/s CAN channel came up and the VIN request went out on the real hardware. The real firmware also
+  accepts the **ISO 14230 (K-line) channel** (`ato4 10400` → `aro`), so the K-line path establishes its channel on the
+  adapter; its init + exchange still need an old K-line car to confirm. On the bench there is no car, so no ECU answers.
 
   ```sh
   tools/op2-cli/build.sh                                   # builds ./op2-cli for macOS/Linux
