@@ -12,6 +12,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.style.TextOverflow
 import com.owis.diag.UiState
 import com.owis.diag.data.ModuleScan
 import com.owis.diag.ui.*
@@ -20,20 +21,21 @@ import com.owis.diag.ui.theme.*
 @Composable
 fun ScanScreen(ui: UiState, onScan: () -> Unit, onClearAll: () -> Unit) {
     Column(Modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text("Fault memory", style = MaterialTheme.typography.titleLarge, color = OnBg)
-                val faults = ui.scan.sumOf { it.faults.size }
-                Text(if (ui.scan.isEmpty()) "Not scanned yet" else "${ui.scan.size} units • $faults faults",
-                    style = MaterialTheme.typography.bodyMedium, color = OnMuted)
-            }
+        Column(Modifier.fillMaxWidth().padding(16.dp)) {
+            Text("Fault memory", style = MaterialTheme.typography.titleLarge, color = OnBg,
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
+            val faults = ui.scan.sumOf { it.faults.size }
+            Text(if (ui.scan.isEmpty()) "Not scanned yet" else "${ui.scan.size} units • $faults faults",
+                style = MaterialTheme.typography.bodyMedium, color = OnMuted)
+            Spacer(Modifier.height(12.dp))
             val live = ui.connected || ui.replaying
-            FilledTonalButton(onClick = onClearAll, enabled = ui.connected && !ui.busy) {
-                Icon(Icons.Filled.DeleteSweep, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Clear")
-            }
-            Spacer(Modifier.width(8.dp))
-            Button(onClick = onScan, enabled = live && !ui.busy) {
-                Icon(Icons.Filled.Search, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Scan")
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Button(onClick = onScan, enabled = live && !ui.busy, modifier = Modifier.weight(1f)) {
+                    Icon(Icons.Filled.Search, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Scan")
+                }
+                FilledTonalButton(onClick = onClearAll, enabled = ui.connected && !ui.busy, modifier = Modifier.weight(1f)) {
+                    Icon(Icons.Filled.DeleteSweep, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Clear")
+                }
             }
         }
         if (ui.busy && ui.scan.isEmpty()) LinearProgressIndicator(Modifier.fillMaxWidth(), color = Accent)

@@ -30,7 +30,7 @@
 </p>
 
 <p align="center"><sub>Home · scan of every control unit · a fault with its freeze-frame data · guided jobs.
-The populated views are a replayed, VIN-redacted session.</sub></p>
+Home is a real phone (Moto G60, Android 12); the populated views are a replayed, VIN-redacted session.</sub></p>
 
 ## What it is
 
@@ -114,9 +114,18 @@ The engine headers under `app/src/main/cpp/engine/` are vendored from the deskto
   ```
 
   The app itself also runs on-device (the screenshots above are a real, replayed session).
-- **Not yet verified:** the physical link to a real OpenPort 2.0 on a car, and K-line init over that adapter (the
-  OpenPort 2.0 library stubs the fast-init). This is the **same open item as desktop OWIS**, whose on-car
-  confirmation is also pending — it needs the hardware. Please report back with a recorded session.
+- **Hardware, bench-tested:** the engine was run against a **real Tactrix OpenPort 2.0** (firmware 1.17.4877) from a
+  desktop over its serial port with `tools/op2-cli` (same engine + the same vendored `op2lib/op2.c`): the adapter
+  opened, the 500 kbit/s CAN channel came up and the VIN request went out on the real hardware. On the bench there is
+  no car, so there is no ECU to answer.
+
+  ```sh
+  tools/op2-cli/build.sh                                   # builds ./op2-cli for macOS/Linux
+  ./op2-cli /dev/cu.usbmodemXXXX <data-dir> probe          # or: detect | scan  (plug into the car's OBD port)
+  ```
+- **Not yet verified:** a full scan on a **car** (needs the adapter in the OBD port with the ignition on), and K-line
+  init over the adapter (the OpenPort 2.0 library stubs the fast-init). This is the **same open item as desktop
+  OWIS**, whose on-car confirmation is also pending. Please report back with a recorded session.
 
 ## Hardware
 
