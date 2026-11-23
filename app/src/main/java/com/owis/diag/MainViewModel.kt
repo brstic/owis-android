@@ -78,6 +78,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun dataDir(): File = File(getApplication<Application>().getExternalFilesDir(null), "data").apply { mkdirs() }
     private fun keyFile(): File = File(dataDir(), "owis.keys")
+    fun reportsDir(): File = File(getApplication<Application>().getExternalFilesDir(null), "reports").apply { mkdirs() }
+
+    @Volatile private var logFile: File? = null
+    private fun writeLogLine(line: String) {
+        val f = logFile ?: return
+        runCatching { synchronized(f) { f.appendText(line + "\n") } }
+    }
+
+    /** All saved session files (traces, logs, reports, CSVs), newest first — for sharing them off the phone. */
+    fun sessionFiles(): List<File> =
+        reportsDir().listFiles()?.filter { it.isFile }?.sortedByDescending { it.lastModified() } ?: emptyList()
 
     init {
         Native.nativeRegister(usb, callbacks)
@@ -96,9 +107,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private fun appendLog(line: String) = _ui.update {
-        val l = (it.log + line).takeLast(400); it.copy(log = l)
+    private fun appendLog(line: String) {
+        writeLogLine(line)
+        _ui.update { val l = (it.log + line).takeLast(400); it.copy(log = l) }
     }
+
+    private fun stamp() = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US).format(java.util.Date())
 
     fun connect(device: UsbDevice) {
         if (_ui.value.busy) return
@@ -107,6 +121,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             if (!usb.open(device)) { set(busy = false, status = "Could not open the adapter"); return@launch }
             appendLog("Adapter opened. Handshaking with the OpenPort 2.0…")
             if (!Native.nativeConnect()) { usb.close(); set(busy = false, status = "Adapter did not respond"); return@launch }
+            // start a persistent log file and auto-record the whole session, so logs are kept on the phone
+            val ts = stamp()
+            logFile = File(reportsDir(), "OWIS_log_$ts.txt").also { runCatching { it.writeText("OWIS session $ts\n") } }
+            val trace = File(reportsDir(), "OWIS_trace_$ts.ptrace")
+            if (Native.nativeStartRecord(trace.absolutePath)) _ui.update { it.copy(recording = true) }
             set(connected = true, status = "Reading the VIN…")
             val v = Parse.vehicle(Native.nativeDetect())
             if (v != null) {
@@ -156,8 +175,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun runJob(id: String) = io("Running job…") { Native.nativeRunJob(id, null) }
 
     fun disconnect() {
-        Native.nativeDisconnect(); usb.close()
-        _ui.update { it.copy(connected = false, vehicle = null, scan = emptyList(), live = emptyMap(), status = "Not connected") }
+        Native.nativeDisconnect(); usb.close(); logFile = null
+        _ui.update { it.copy(connected = false, recording = false, vehicle = null, scan = emptyList(), live = emptyMap(), status = "Not connected") }
     }
 
     fun stop() = Native.nativeStop()

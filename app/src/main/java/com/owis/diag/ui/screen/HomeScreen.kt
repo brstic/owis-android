@@ -28,6 +28,7 @@ fun HomeScreen(
     onModule: () -> Unit,
     onReplay: () -> Unit,
     onShareReport: () -> Unit,
+    onShareLogs: () -> Unit = {},
 ) {
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
@@ -113,6 +114,11 @@ fun HomeScreen(
             if (ui.reportHtml.isNotEmpty())
                 ActionRow(Icons.Filled.Share, "Share the scan report", "HTML, printable", onShareReport)
         }
+
+        // logs are always saved on the phone; share them off after testing on the car
+        ActionRow(Icons.Filled.Upload, "Share logs & traces", "Send the saved session files off the phone", onShareLogs)
+        if (ui.recording) Text("● Recording this session (saved on the phone)",
+            style = MaterialTheme.typography.labelSmall, color = Accent, modifier = Modifier.padding(start = 4.dp))
 
         // session options
         Card {
