@@ -26,6 +26,7 @@ data class UiState(
     val jobs: List<Job> = emptyList(),
     val log: List<String> = emptyList(),
     val live: Map<String, Float> = emptyMap(),
+    val liveHistory: Map<String, List<Float>> = emptyMap(),
     val redactVin: Boolean = false,
     val recording: Boolean = false,
     val reportHtml: String = "",
@@ -41,11 +42,39 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         log = { line -> appendLog(line) },
         out = { line -> appendLog(line) },
         live = { _, values, names ->
-            if (values.isNotEmpty()) _ui.update { st ->
-                val m = st.live.toMutableMap(); for (i in values.indices) m[names.getOrElse(i) { "#$i" }] = values[i]; st.copy(live = m)
+            if (values.isNotEmpty()) {
+                val row = StringBuilder(System.currentTimeMillis().toString())
+                _ui.update { st ->
+                    val m = st.live.toMutableMap()
+                    val h = st.liveHistory.toMutableMap()
+                    for (i in values.indices) {
+                        val name = names.getOrElse(i) { "#$i" }
+                        m[name] = values[i]
+                        h[name] = ((h[name] ?: emptyList()) + values[i]).takeLast(120)
+                        row.append(',').append(values[i])
+                    }
+                    st.copy(live = m, liveHistory = h)
+                }
+                synchronized(csvRows) { csvRows.add(row.toString()) }
             }
         },
     )
+
+    private val csvRows = mutableListOf<String>()
+
+    /** Write the accumulated live readings to a CSV file and return it (null if nothing recorded). */
+    fun exportLiveCsv(): File? {
+        val rows = synchronized(csvRows) { csvRows.toList() }
+        if (rows.isEmpty()) return null
+        val names = _ui.value.liveHistory.keys.toList()
+        val dir = File(getApplication<Application>().getExternalFilesDir(null), "reports").apply { mkdirs() }
+        val f = File(dir, "OWIS_live_${System.currentTimeMillis()}.csv")
+        f.bufferedWriter().use { w ->
+            w.write("time_ms," + names.joinToString(","){ "\"" + it.replace("\"","'") + "\"" }); w.newLine()
+            rows.forEach { w.write(it); w.newLine() }
+        }
+        return f
+    }
 
     private fun dataDir(): File = File(getApplication<Application>().getExternalFilesDir(null), "data").apply { mkdirs() }
     private fun keyFile(): File = File(dataDir(), "owis.keys")
@@ -141,7 +170,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
     fun runFunction(moduleIndex: Int, entry: Int) = io("Running…") { Native.nativeRun(moduleIndex, entry, null) }
     fun live(moduleIndex: Int, sel: IntArray, rounds: Int) = io("Reading live data…") {
-        _ui.update { it.copy(live = emptyMap()) }; Native.nativeLive(moduleIndex, sel, rounds)
+        synchronized(csvRows) { csvRows.clear() }
+        _ui.update { it.copy(live = emptyMap(), liveHistory = emptyMap()) }
+        Native.nativeLive(moduleIndex, sel, rounds)
     }
 
     private fun io(status: String, block: suspend () -> Unit) {

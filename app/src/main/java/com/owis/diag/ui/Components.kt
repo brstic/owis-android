@@ -53,3 +53,27 @@ fun statusColor(status: String): Color = when {
 fun Mono(text: String, color: Color = OnMuted, modifier: Modifier = Modifier) =
     Text(text, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall, color = color,
         modifier = modifier, overflow = TextOverflow.Ellipsis)
+
+val SeriesColors = listOf(Accent, Info, Warn, Danger, Color(0xFFB794F6), Color(0xFF63B3ED))
+
+@Composable
+fun LineChart(series: Map<String, List<Float>>, modifier: Modifier = Modifier) {
+    if (series.isEmpty()) return
+    val all = series.values.flatten()
+    val mn = all.minOrNull() ?: 0f
+    val mx = all.maxOrNull() ?: 1f
+    val range = (mx - mn).let { if (it > 0f) it else 1f }
+    androidx.compose.foundation.Canvas(modifier) {
+        series.values.forEachIndexed { si, pts ->
+            if (pts.size < 2) return@forEachIndexed
+            val col = SeriesColors[si % SeriesColors.size]
+            val path = androidx.compose.ui.graphics.Path()
+            pts.forEachIndexed { i, v ->
+                val x = size.width * i / (pts.size - 1)
+                val y = size.height * (1f - (v - mn) / range)
+                if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+            }
+            drawPath(path, col, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 3f))
+        }
+    }
+}

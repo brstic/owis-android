@@ -6,6 +6,10 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyHorizontalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.ui.draw.clip
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ExpandMore
@@ -34,8 +38,9 @@ private fun catColor(c: String): Color = when (c) {
 }
 private fun isWrite(c: String) = c == "A" || c == "U" || c == "F" || c == "C"
 
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
-fun ModuleScreen(vm: MainViewModel, ui: UiState) {
+fun ModuleScreen(vm: MainViewModel, ui: UiState, onShareCsv: () -> Unit = {}) {
     var modules by remember { mutableStateOf<List<ModuleRef>>(emptyList()) }
     var module by remember { mutableStateOf<ModuleRef?>(null) }
     var fns by remember { mutableStateOf<List<Fn>>(emptyList()) }
@@ -68,6 +73,27 @@ fun ModuleScreen(vm: MainViewModel, ui: UiState) {
             OutlinedTextField(value = filter, onValueChange = { filter = it },
                 label = { Text("Filter functions") }, singleLine = true, modifier = Modifier.fillMaxWidth())
 
+            if (ui.liveHistory.values.any { it.size >= 2 }) {
+                Spacer(Modifier.height(10.dp))
+                Card {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("LIVE", style = MaterialTheme.typography.labelSmall, color = OnMuted, modifier = Modifier.weight(1f))
+                        TextButton(onClick = onShareCsv) { Icon(Icons.Filled.Share, null, Modifier.size(16.dp)); Spacer(Modifier.width(4.dp)); Text("CSV") }
+                    }
+                    com.owis.diag.ui.LineChart(ui.liveHistory, Modifier.fillMaxWidth().height(120.dp))
+                    Spacer(Modifier.height(6.dp))
+                    androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        ui.liveHistory.keys.forEachIndexed { i, name ->
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(Modifier.size(10.dp).clip(androidx.compose.foundation.shape.CircleShape)
+                                    .background(com.owis.diag.ui.SeriesColors[i % com.owis.diag.ui.SeriesColors.size]))
+                                Spacer(Modifier.width(4.dp))
+                                Text(name, style = MaterialTheme.typography.labelSmall, color = OnMuted)
+                            }
+                        }
+                    }
+                }
+            }
             if (ui.live.isNotEmpty()) {
                 Spacer(Modifier.height(10.dp))
                 LazyHorizontalGrid(rows = GridCells.Fixed(1), modifier = Modifier.height(78.dp),

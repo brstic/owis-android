@@ -73,7 +73,8 @@ class MainActivity : ComponentActivity() {
                     onConnect = ::startConnect,
                     onImport = { importer.launch(null) },
                     onReplay = { replayer.launch(arrayOf("*/*")) },
-                    onShareReport = { shareReport(ui.reportHtml) })
+                    onShareReport = { shareReport(ui.reportHtml) },
+                    onShareCsv = { shareCsv() })
             }
         }
     }
@@ -82,6 +83,13 @@ class MainActivity : ComponentActivity() {
         val tmp = File(cacheDir, "replay.ptrace")
         runCatching { contentResolver.openInputStream(uri)?.use { it.copyTo(tmp.outputStream()) } }
         if (tmp.exists() && tmp.length() > 0) vm.replay(tmp) else toast("Could not read the trace file")
+    }
+
+    private fun shareCsv() {
+        val f = vm.exportLiveCsv() ?: run { toast("No live data recorded yet"); return }
+        val uri = androidx.core.content.FileProvider.getUriForFile(this, "$packageName.files", f)
+        startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/csv")
+            .putExtra(Intent.EXTRA_STREAM, uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), "Share live CSV"))
     }
 
     private fun shareReport(htmlPath: String) {
@@ -136,7 +144,7 @@ private enum class Tab(val label: String, val icon: ImageVector) {
 @Composable
 private fun AppScaffold(
     vm: MainViewModel, ui: UiState,
-    onConnect: () -> Unit, onImport: () -> Unit, onReplay: () -> Unit, onShareReport: () -> Unit,
+    onConnect: () -> Unit, onImport: () -> Unit, onReplay: () -> Unit, onShareReport: () -> Unit, onShareCsv: () -> Unit,
 ) {
     var tab by remember { mutableStateOf(Tab.Home) }
     Scaffold(
@@ -159,7 +167,7 @@ private fun AppScaffold(
                     onScan = { vm.scan(); tab = Tab.Faults }, onJobs = { tab = Tab.Jobs },
                     onModule = { tab = Tab.Module }, onReplay = onReplay, onShareReport = onShareReport)
                 Tab.Faults -> ScanScreen(ui, onScan = vm::scan, onClearAll = vm::clearAll)
-                Tab.Module -> ModuleScreen(vm, ui)
+                Tab.Module -> ModuleScreen(vm, ui, onShareCsv = onShareCsv)
                 Tab.Jobs -> JobsScreen(ui, onRun = vm::runJob)
                 Tab.Log -> LogScreen(ui, onStop = vm::stop)
             }
