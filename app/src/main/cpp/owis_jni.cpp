@@ -8,6 +8,7 @@
 #include <vector>
 #include "engine/engine.h"
 #include "engine/sim.h"
+#include "engine/trace.h"
 #include "op2_bus.h"
 
 using namespace pt;
@@ -18,7 +19,10 @@ static jobject g_cb = nullptr;           // Kotlin NativeCallbacks: onLog/onOut/
 static jmethodID m_write = nullptr, m_read = nullptr, m_onLog = nullptr, m_onOut = nullptr, m_onLive = nullptr;
 
 static Engine g_en;
-static std::unique_ptr<Op2Bus> g_bus;
+static std::unique_ptr<Op2Bus> g_op2;
+static std::unique_ptr<ReplayBus> g_replay;
+static TraceWriter g_rec; static bool g_recording = false;
+static Bus *bus() { return g_replay ? (Bus *)g_replay.get() : (Bus *)g_op2.get(); }
 static std::vector<PackInfo> g_packs;    // pack heads for VIN detection
 
 static JNIEnv *env() {
@@ -110,6 +114,17 @@ extern "C" {
 
 JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *) { g_vm = vm; return JNI_VERSION_1_6; }
 
+// ---- USB byte I/O hooks called by the vendored op2.c (built with -DOP2_ANDROID_USB) ----
+int op2_usb_write(const void *buf, int len) {
+    UsbPipe *p = op2ActivePipe(); if (!p || !p->write) return 0;
+    int w = p->write((const uint8_t *)buf, len); return (w == len) ? 1 : 0;
+}
+int op2_usb_read(void *buf, int max, int timeout_ms) {
+    UsbPipe *p = op2ActivePipe(); if (!p || !p->read) return -1;
+    return p->read((uint8_t *)buf, max, timeout_ms);
+}
+int op2_usb_isopen(void) { return op2ActivePipe() ? 1 : 0; }
+
 // Register the Kotlin UsbLink and NativeCallbacks objects (global refs) and cache their method ids.
 JNIEXPORT void JNICALL Java_com_owis_diag_Native_nativeRegister(JNIEnv *e, jclass, jobject usb, jobject cb) {
     if (g_usb) e->DeleteGlobalRef(g_usb);
@@ -149,12 +164,15 @@ JNIEXPORT jint JNICALL Java_com_owis_diag_Native_nativeKeyCount(JNIEnv *, jclass
 
 JNIEXPORT jboolean JNICALL Java_com_owis_diag_Native_nativeConnect(JNIEnv *, jclass) {
     UsbPipe pipe; pipe.write = usbWrite; pipe.read = usbRead;
-    g_bus.reset(new Op2Bus(pipe));
-    g_bus->onError = [](const std::string &s) { cbLog(s); };
-    g_bus->tap = nullptr;
-    return g_bus->open() ? JNI_TRUE : JNI_FALSE;
+    g_replay.reset();
+    g_op2.reset(new Op2Bus(pipe));
+    g_op2->onError = [](const std::string &s) { cbLog(s); };
+    return g_op2->open() ? JNI_TRUE : JNI_FALSE;
 }
-JNIEXPORT void JNICALL Java_com_owis_diag_Native_nativeDisconnect(JNIEnv *, jclass) { if (g_bus) { g_bus->close(); g_bus.reset(); } }
+JNIEXPORT void JNICALL Java_com_owis_diag_Native_nativeDisconnect(JNIEnv *, jclass) {
+    if (g_recording) { g_rec.close(); g_recording = false; }
+    if (g_op2) { g_op2->close(); g_op2.reset(); }
+}
 
 JNIEXPORT jboolean JNICALL Java_com_owis_diag_Native_nativeLoadPack(JNIEnv *e, jclass, jstring path) {
     std::string err; bool ok = g_en.loadPack(jToStr(e, path), err); if (!err.empty()) cbLog(err); return ok ? JNI_TRUE : JNI_FALSE;
@@ -162,8 +180,8 @@ JNIEXPORT jboolean JNICALL Java_com_owis_diag_Native_nativeLoadPack(JNIEnv *e, j
 
 // Detect the car from the VIN, load the matching pack. Returns JSON {vin,packId,title} or {} on failure.
 JNIEXPORT jstring JNICALL Java_com_owis_diag_Native_nativeDetect(JNIEnv *e, jclass) {
-    if (!g_bus) return toJ(e, "{}");
-    std::string how; int k = g_en.detectVehicle(*g_bus, g_packs, how);
+    if (!bus()) return toJ(e, "{}");
+    std::string how; int k = g_en.detectVehicle(*bus(), g_packs, how);
     cbLog(how);
     if (k < 0 || k >= (int)g_packs.size()) return toJ(e, "{}");
     std::string err; g_en.loadPack(g_packs[k].path, err);
@@ -172,11 +190,11 @@ JNIEXPORT jstring JNICALL Java_com_owis_diag_Native_nativeDetect(JNIEnv *e, jcla
 }
 
 JNIEXPORT jstring JNICALL Java_com_owis_diag_Native_nativeScan(JNIEnv *e, jclass) {
-    if (!g_bus || !g_en.packOk) return toJ(e, "[]");
-    g_en.stop = false; g_en.actScanAll(*g_bus);
+    if (!bus() || !g_en.packOk) return toJ(e, "[]");
+    g_en.stop = false; g_en.actScanAll(*bus());
     return toJ(e, scanJson());
 }
-JNIEXPORT void JNICALL Java_com_owis_diag_Native_nativeClearAll(JNIEnv *, jclass) { if (g_bus && g_en.packOk) g_en.actClearAll(*g_bus); }
+JNIEXPORT void JNICALL Java_com_owis_diag_Native_nativeClearAll(JNIEnv *, jclass) { if (bus() && g_en.packOk) g_en.actClearAll(*bus()); }
 
 JNIEXPORT jstring JNICALL Java_com_owis_diag_Native_nativeModules(JNIEnv *e, jclass) {
     std::string o = "["; for (size_t i = 0; i < g_en.pack.mods.size(); i++) { if (i) o += ",";
@@ -195,14 +213,14 @@ JNIEXPORT jstring JNICALL Java_com_owis_diag_Native_nativeFunctions(JNIEnv *e, j
 }
 
 JNIEXPORT jboolean JNICALL Java_com_owis_diag_Native_nativeRun(JNIEnv *e, jclass, jint mi, jint entry, jdoubleArray inputs) {
-    if (!g_bus) return JNI_FALSE;
+    if (!bus()) return JNI_FALSE;
     pk::Inputs in; if (inputs) { jsize n = e->GetArrayLength(inputs); std::vector<jdouble> v(n); e->GetDoubleArrayRegion(inputs, 0, n, v.data()); for (auto x : v) in.push_back((double)x); }
-    g_en.stop = false; return g_en.runFunction(*g_bus, mi, entry, in) ? JNI_TRUE : JNI_FALSE;
+    g_en.stop = false; return g_en.runFunction(*bus(), mi, entry, in) ? JNI_TRUE : JNI_FALSE;
 }
 JNIEXPORT void JNICALL Java_com_owis_diag_Native_nativeLive(JNIEnv *e, jclass, jint mi, jintArray sel, jint rounds) {
-    if (!g_bus) return;
+    if (!bus()) return;
     std::vector<int> s; if (sel) { jsize n = e->GetArrayLength(sel); std::vector<jint> v(n); e->GetIntArrayRegion(sel, 0, n, v.data()); for (auto x : v) s.push_back((int)x); }
-    g_en.stop = false; g_en.runLive(*g_bus, mi, s, {}, rounds);
+    g_en.stop = false; g_en.runLive(*bus(), mi, s, {}, rounds);
 }
 JNIEXPORT void JNICALL Java_com_owis_diag_Native_nativeStop(JNIEnv *, jclass) { g_en.stop = true; }
 
@@ -213,13 +231,33 @@ JNIEXPORT jstring JNICALL Java_com_owis_diag_Native_nativeJobs(JNIEnv *e, jclass
     o += "]"; return toJ(e, o);
 }
 JNIEXPORT jboolean JNICALL Java_com_owis_diag_Native_nativeRunJob(JNIEnv *e, jclass, jstring id, jdoubleArray inputs) {
-    if (!g_bus) return JNI_FALSE;
+    if (!bus()) return JNI_FALSE;
     const pk::Job *j = g_en.findJob(jToStr(e, id)); if (!j) return JNI_FALSE;
     pk::Inputs in; if (inputs) { jsize n = e->GetArrayLength(inputs); std::vector<jdouble> v(n); e->GetDoubleArrayRegion(inputs, 0, n, v.data()); for (auto x : v) in.push_back((double)x); }
-    g_en.stop = false; return g_en.runJob(*g_bus, *j, {in}) ? JNI_TRUE : JNI_FALSE;
+    g_en.stop = false; return g_en.runJob(*bus(), *j, {in}) ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT jstring JNICALL Java_com_owis_diag_Native_nativeVin(JNIEnv *e, jclass) { return toJ(e, g_en.vin); }
 JNIEXPORT jstring JNICALL Java_com_owis_diag_Native_nativeReportHtml(JNIEnv *e, jclass) { return toJ(e, g_en.lastHtml); }
+JNIEXPORT void JNICALL Java_com_owis_diag_Native_nativeSetRedactVin(JNIEnv *, jclass, jboolean on) { g_en.redactVin = on; }
+
+// Session record / replay (same trace format as the desktop app).
+JNIEXPORT jboolean JNICALL Java_com_owis_diag_Native_nativeStartRecord(JNIEnv *e, jclass, jstring path) {
+    if (!bus()) return JNI_FALSE;
+    if (g_recording) { g_rec.close(); g_recording = false; }
+    if (!g_rec.open(jToStr(e, path))) return JNI_FALSE;
+    g_rec.attach(*bus()); g_recording = true; return JNI_TRUE;
+}
+JNIEXPORT void JNICALL Java_com_owis_diag_Native_nativeStopRecord(JNIEnv *, jclass) {
+    if (g_recording) { g_rec.close(); g_recording = false; if (bus()) bus()->tap = nullptr; }
+}
+JNIEXPORT jboolean JNICALL Java_com_owis_diag_Native_nativeReplay(JNIEnv *e, jclass, jstring path) {
+    ReplayBus *rb = new ReplayBus();
+    if (!rb->load(jToStr(e, path)) || !rb->open()) { delete rb; return JNI_FALSE; }
+    g_replay.reset(rb);
+    std::string how; int k = g_en.detectVehicle(*g_replay, g_packs, how); cbLog(how);
+    if (k >= 0 && k < (int)g_packs.size()) { std::string err; g_en.loadPack(g_packs[k].path, err); }
+    return JNI_TRUE;
+}
 
 } // extern "C"

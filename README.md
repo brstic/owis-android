@@ -29,7 +29,10 @@ USB-OTG / USB-C cable. Everything the desktop tool does on the CAN bus, it does 
 - **Scan** every control unit, read and **clear faults** with their freeze-frame data.
 - **Guided jobs**, one tap each: service reset, bleeding, calibrations, PDK teach-in, adaptation resets …
 - **Live data** with value tiles.
-- **Coding** — unlock with the unit's own seed/key algorithm (needs your `owis.keys`, see below).
+- **Open any control unit** — run its actuator tests, routines and **coding writes** (the unit unlocks with its own
+  seed/key, needs your `owis.keys`), watch read values live.
+- **Reports** — printable HTML scan report with optional VIN redaction, shareable from the app.
+- **Record / replay** — record a session to a `.ptrace` file and replay it later without the car.
 - UDS & KWP2000 over ISO-TP (11/29-bit CAN) and VW TP 2.0 for the units behind the gateway, all in user space on
   top of raw CAN frames.
 
@@ -50,9 +53,11 @@ USB-OTG / USB-C cable. Everything the desktop tool does on the CAN bus, it does 
 
 The engine is unchanged; the Android-specific parts are small and self-contained:
 
-- **`app/src/main/cpp/op2_bus.h`** — the OpenPort 2.0 transport. The OpenPort 2.0 is a USB CDC-ACM device that speaks
-  an ASCII command protocol (`ato`/`atf`/`att … <seq>`) and returns raw CAN frames; OWIS's own `isotp.h` / `tp20.h`
-  run on top. The protocol follows [roffe/libj2534_openport2](https://github.com/roffe/libj2534_openport2).
+- **`app/src/main/cpp/op2lib/`** — the vendored **[roffe/libj2534_openport2](https://github.com/roffe/libj2534_openport2)**
+  library (Apache-2.0): its J2534 PassThru implementation and OpenPort 2.0 command protocol, built with
+  `-DOP2_ANDROID_USB` so only its byte I/O is replaced by Android USB bulk transfers (the `op2_usb_*` hooks).
+- **`app/src/main/cpp/op2_bus.h`** — drives that library's `PassThru*` API to move raw CAN frames; OWIS's own
+  `isotp.h` / `tp20.h` run ISO-TP and VW TP 2.0 on top.
 - **`app/src/main/java/com/owis/diag/usb/Op2Usb.kt`** — opens the adapter over the Android USB host API (bulk
   transfers on the CDC-data interface) and hands the bytes to native code.
 - **`owis_jni.cpp`** — the JNI bridge: the engine runs in native code, USB I/O and log/live callbacks cross back to
@@ -91,7 +96,13 @@ The engine headers under `app/src/main/cpp/engine/` are vendored from the deskto
 - A **USB-OTG** adapter/cable for your phone (USB-C or micro-USB host mode).
 - Ignition on, engine off, a battery charger recommended.
 
+## Credits
+
+- Diagnostic engine: [OWIS](https://github.com/brstic/owis) (MIT).
+- OpenPort 2.0 J2534 library: [roffe/libj2534_openport2](https://github.com/roffe/libj2534_openport2) (Apache-2.0),
+  vendored under `app/src/main/cpp/op2lib/` with its `LICENSE` and `NOTICE`.
+
 ---
 
 Not affiliated with or endorsed by Porsche AG; "Porsche" only names the compatible vehicles. Use at your own risk and
-follow the workshop manual. MIT license.
+follow the workshop manual. MIT license (the vendored OpenPort 2.0 library is Apache-2.0).

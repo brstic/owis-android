@@ -6,13 +6,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.automirrored.filled.ShowChart
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.owis.diag.MainViewModel
 import com.owis.diag.UiState
 import com.owis.diag.ui.*
 import com.owis.diag.ui.theme.*
@@ -20,32 +20,32 @@ import com.owis.diag.ui.theme.*
 @Composable
 fun HomeScreen(
     ui: UiState,
+    vm: MainViewModel,
     onConnect: () -> Unit,
-    onDisconnect: () -> Unit,
     onImport: () -> Unit,
     onScan: () -> Unit,
-    onClearAll: () -> Unit,
     onJobs: () -> Unit,
-    onLive: () -> Unit,
+    onModule: () -> Unit,
+    onReplay: () -> Unit,
+    onShareReport: () -> Unit,
 ) {
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // header
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("OWIS", style = MaterialTheme.typography.headlineMedium, color = OnBg)
             Spacer(Modifier.width(8.dp))
             Text("diagnostics", style = MaterialTheme.typography.titleMedium, color = Accent)
         }
 
-        // connection card
         Card {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                StatusDot(ok = ui.connected, warn = ui.busy)
+                StatusDot(ok = ui.connected || ui.replaying, warn = ui.busy)
                 Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(if (ui.connected) "Connected" else "Adapter", style = MaterialTheme.typography.titleMedium, color = OnBg)
+                    Text(when { ui.replaying -> "Replay"; ui.connected -> "Connected"; else -> "Adapter" },
+                        style = MaterialTheme.typography.titleMedium, color = OnBg)
                     Text(ui.status, style = MaterialTheme.typography.bodyMedium, color = OnMuted)
                 }
                 if (ui.busy) CircularProgressIndicator(Modifier.size(22.dp), color = Accent, strokeWidth = 2.dp)
@@ -56,14 +56,17 @@ fun HomeScreen(
                     modifier = Modifier.fillMaxWidth().height(50.dp), shape = RoundedCornerShape(14.dp)) {
                     Icon(Icons.Filled.Usb, null); Spacer(Modifier.width(8.dp)); Text("Connect to the car", fontWeight = FontWeight.SemiBold)
                 }
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(onClick = onReplay, modifier = Modifier.fillMaxWidth().height(46.dp), shape = RoundedCornerShape(14.dp)) {
+                    Icon(Icons.Filled.History, null); Spacer(Modifier.width(8.dp)); Text("Replay a recorded session")
+                }
             } else {
-                OutlinedButton(onClick = onDisconnect, modifier = Modifier.fillMaxWidth().height(48.dp), shape = RoundedCornerShape(14.dp)) {
+                OutlinedButton(onClick = vm::disconnect, modifier = Modifier.fillMaxWidth().height(48.dp), shape = RoundedCornerShape(14.dp)) {
                     Icon(Icons.Filled.LinkOff, null); Spacer(Modifier.width(8.dp)); Text("Disconnect")
                 }
             }
         }
 
-        // vehicle card
         ui.vehicle?.let { v ->
             Card {
                 SectionTitle("VEHICLE")
@@ -73,7 +76,6 @@ fun HomeScreen(
             }
         }
 
-        // data status
         if (!ui.dataReady) {
             Card {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -103,13 +105,34 @@ fun HomeScreen(
             }
         }
 
-        // quick actions
-        if (ui.connected) {
+        if (ui.connected || ui.replaying) {
             Text("ACTIONS", style = MaterialTheme.typography.labelSmall, color = OnMuted)
             ActionRow(Icons.Filled.Search, "Scan all control units", "Read and clear faults", onScan)
-            ActionRow(Icons.Filled.DeleteSweep, "Clear all faults", "Across every module", onClearAll)
+            ActionRow(Icons.Filled.Tune, "Open a control unit", "Tests, routines, coding, live data", onModule)
             ActionRow(Icons.Filled.Build, "Guided jobs", "Service, calibrations, PDK", onJobs)
-            ActionRow(Icons.AutoMirrored.Filled.ShowChart, "Live data", "Watch values in real time", onLive)
+            if (ui.reportHtml.isNotEmpty())
+                ActionRow(Icons.Filled.Share, "Share the scan report", "HTML, printable", onShareReport)
+        }
+
+        // session options
+        Card {
+            SectionTitle("SESSION")
+            Spacer(Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Redact VIN in reports", style = MaterialTheme.typography.bodyLarge, color = OnBg)
+                    Text("Hide the serial in the HTML report", style = MaterialTheme.typography.bodyMedium, color = OnMuted)
+                }
+                Switch(checked = ui.redactVin, onCheckedChange = { vm.setRedactVin(it) })
+            }
+            if (ui.connected) {
+                Spacer(Modifier.height(10.dp))
+                OutlinedButton(onClick = vm::toggleRecord, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp)) {
+                    Icon(if (ui.recording) Icons.Filled.StopCircle else Icons.Filled.FiberManualRecord, null,
+                        tint = if (ui.recording) Danger else Accent)
+                    Spacer(Modifier.width(8.dp)); Text(if (ui.recording) "Stop recording" else "Record this session")
+                }
+            }
         }
         Spacer(Modifier.height(24.dp))
     }

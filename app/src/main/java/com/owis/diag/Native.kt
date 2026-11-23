@@ -24,4 +24,8 @@ object Native {
     external fun nativeRunJob(id: String, inputs: DoubleArray?): Boolean
     external fun nativeVin(): String
     external fun nativeReportHtml(): String
+    external fun nativeSetRedactVin(on: Boolean)
+    external fun nativeStartRecord(path: String): Boolean
+    external fun nativeStopRecord()
+    external fun nativeReplay(path: String): Boolean
 }

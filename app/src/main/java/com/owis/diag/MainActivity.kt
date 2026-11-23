@@ -19,7 +19,6 @@ import androidx.activity.viewModels
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.automirrored.filled.ShowChart
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -58,10 +57,33 @@ class MainActivity : ComponentActivity() {
         setContent {
             val ui by vm.ui.collectAsStateWithLifecycle()
             val importer = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
-                if (uri != null) { importData(uri); }
+                if (uri != null) importData(uri)
             }
-            OwisTheme { AppScaffold(vm, ui, onConnect = ::startConnect, onImport = { importer.launch(null) }) }
+            val replayer = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+                if (uri != null) replaySession(uri)
+            }
+            OwisTheme {
+                AppScaffold(vm, ui,
+                    onConnect = ::startConnect,
+                    onImport = { importer.launch(null) },
+                    onReplay = { replayer.launch(arrayOf("*/*")) },
+                    onShareReport = { shareReport(ui.reportHtml) })
+            }
         }
+    }
+
+    private fun replaySession(uri: Uri) {
+        val tmp = File(cacheDir, "replay.ptrace")
+        runCatching { contentResolver.openInputStream(uri)?.use { it.copyTo(tmp.outputStream()) } }
+        if (tmp.exists() && tmp.length() > 0) vm.replay(tmp) else toast("Could not read the trace file")
+    }
+
+    private fun shareReport(path: String) {
+        if (path.isEmpty() || !File(path).exists()) { toast("Scan the car first to make a report"); return }
+        val uri = androidx.core.content.FileProvider.getUriForFile(this, "$packageName.files", File(path))
+        val send = Intent(Intent.ACTION_SEND).setType("text/html")
+            .putExtra(Intent.EXTRA_STREAM, uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        startActivity(Intent.createChooser(send, "Share report"))
     }
 
     override fun onDestroy() { super.onDestroy(); runCatching { unregisterReceiver(usbReceiver) } }
@@ -98,13 +120,16 @@ class MainActivity : ComponentActivity() {
 private enum class Tab(val label: String, val icon: ImageVector) {
     Home("Home", Icons.Filled.DirectionsCar),
     Faults("Faults", Icons.Filled.Search),
+    Module("Module", Icons.Filled.Tune),
     Jobs("Jobs", Icons.Filled.Build),
-    Live("Live", Icons.AutoMirrored.Filled.ShowChart),
     Log("Log", Icons.Filled.Terminal),
 }
 
 @Composable
-private fun AppScaffold(vm: MainViewModel, ui: UiState, onConnect: () -> Unit, onImport: () -> Unit) {
+private fun AppScaffold(
+    vm: MainViewModel, ui: UiState,
+    onConnect: () -> Unit, onImport: () -> Unit, onReplay: () -> Unit, onShareReport: () -> Unit,
+) {
     var tab by remember { mutableStateOf(Tab.Home) }
     Scaffold(
         bottomBar = {
@@ -122,12 +147,12 @@ private fun AppScaffold(vm: MainViewModel, ui: UiState, onConnect: () -> Unit, o
     ) { pad ->
         Box(Modifier.padding(pad)) {
             when (tab) {
-                Tab.Home -> HomeScreen(ui, onConnect = onConnect, onDisconnect = vm::disconnect, onImport = onImport,
-                    onScan = { vm.scan(); tab = Tab.Faults }, onClearAll = vm::clearAll,
-                    onJobs = { tab = Tab.Jobs }, onLive = { tab = Tab.Live })
+                Tab.Home -> HomeScreen(ui, vm, onConnect = onConnect, onImport = onImport,
+                    onScan = { vm.scan(); tab = Tab.Faults }, onJobs = { tab = Tab.Jobs },
+                    onModule = { tab = Tab.Module }, onReplay = onReplay, onShareReport = onShareReport)
                 Tab.Faults -> ScanScreen(ui, onScan = vm::scan, onClearAll = vm::clearAll)
+                Tab.Module -> ModuleScreen(vm, ui)
                 Tab.Jobs -> JobsScreen(ui, onRun = vm::runJob)
-                Tab.Live -> LiveScreen(vm, ui)
                 Tab.Log -> LogScreen(ui, onStop = vm::stop)
             }
         }

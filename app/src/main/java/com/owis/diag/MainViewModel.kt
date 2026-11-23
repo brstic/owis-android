@@ -26,6 +26,10 @@ data class UiState(
     val jobs: List<Job> = emptyList(),
     val log: List<String> = emptyList(),
     val live: Map<String, Float> = emptyMap(),
+    val redactVin: Boolean = false,
+    val recording: Boolean = false,
+    val reportHtml: String = "",
+    val replaying: Boolean = false,
 )
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
@@ -96,7 +100,26 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun scan() = io("Scanning all control units…") {
         val res = runCatching { Parse.scan(Native.nativeScan()) }.getOrDefault(emptyList())
-        _ui.update { it.copy(scan = res, status = "Scan: ${res.size} units answered") }
+        _ui.update { it.copy(scan = res, reportHtml = Native.nativeReportHtml(), status = "Scan: ${res.size} units answered") }
+    }
+
+    fun setRedactVin(on: Boolean) { Native.nativeSetRedactVin(on); _ui.update { it.copy(redactVin = on) } }
+
+    fun toggleRecord() {
+        if (_ui.value.recording) { Native.nativeStopRecord(); _ui.update { it.copy(recording = false) } }
+        else {
+            val dir = File(getApplication<Application>().getExternalFilesDir(null), "reports").apply { mkdirs() }
+            val path = File(dir, "OWIS_trace_${System.currentTimeMillis()}.ptrace").absolutePath
+            if (Native.nativeStartRecord(path)) _ui.update { it.copy(recording = true, status = "Recording session…") }
+        }
+    }
+
+    fun replay(file: File) = io("Replaying session…") {
+        if (Native.nativeReplay(file.absolutePath)) {
+            val jobs = runCatching { Parse.jobs(Native.nativeJobs()) }.getOrDefault(emptyList())
+            val v = Vehicle(Native.nativeVin(), "", "Replay")
+            _ui.update { it.copy(replaying = true, vehicle = v, jobs = jobs, status = "Replaying ${file.name}") }
+        }
     }
 
     fun clearAll() = io("Clearing all fault memories…") { Native.nativeClearAll(); }
