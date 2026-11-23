@@ -102,6 +102,22 @@ Needs Android Studio (or the command-line tools) with **NDK 27** and **CMake 3.2
 The engine headers under `app/src/main/cpp/engine/` are vendored from the desktop repo; refresh them with
 `tools/sync-engine.sh ../porsche-tool`.
 
+## What is verified
+
+- **Software, on an Android device:** the engine test suite builds with the NDK and **passes on-device** —
+  scan, fault + freeze-frame decode, **coding writes** (`0x27` unlock + `0x2E`, wrong-key rejection, no-key
+  handling), **K-line KWP2000 SecurityAccess**, **guided jobs** (PDK teach-in with its conditions), **VW TP 2.0**
+  and live data, all against the built-in simulated car. Run it yourself:
+
+  ```sh
+  tools/run-engine-tests.sh <your data pack>.json      # on a connected device/emulator -> "ALL ENGINE TESTS PASSED"
+  ```
+
+  The app itself also runs on-device (the screenshots above are a real, replayed session).
+- **Not yet verified:** the physical link to a real OpenPort 2.0 on a car, and K-line init over that adapter (the
+  OpenPort 2.0 library stubs the fast-init). This is the **same open item as desktop OWIS**, whose on-car
+  confirmation is also pending — it needs the hardware. Please report back with a recorded session.
+
 ## Hardware
 
 - A **Tactrix OpenPort 2.0** (VID `0403`, PID `CC4B/CC4C/CC4D`).
