@@ -20,6 +20,18 @@
 > ⚠️ **Development preview — not yet confirmed on a car from the phone.** The desktop engine is confirmed on a real
 > Porsche; this app wraps that same engine over USB. Try it and report back with the session log.
 
+## Screenshots
+
+<p align="center">
+  <img src="docs/screenshots/home.png" width="24%" alt="Home">
+  <img src="docs/screenshots/faults.png" width="24%" alt="Scan">
+  <img src="docs/screenshots/fault-detail.png" width="24%" alt="Fault detail">
+  <img src="docs/screenshots/jobs.png" width="24%" alt="Guided jobs">
+</p>
+
+<p align="center"><sub>Home · scan of every control unit · a fault with its freeze-frame data · guided jobs.
+The populated views are a replayed, VIN-redacted session.</sub></p>
+
 ## What it is
 
 A native Android app that runs the **portable OWIS diagnostic engine** (the exact `src/*.h` from the desktop

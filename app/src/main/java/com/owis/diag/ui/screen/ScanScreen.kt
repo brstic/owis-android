@@ -27,11 +27,12 @@ fun ScanScreen(ui: UiState, onScan: () -> Unit, onClearAll: () -> Unit) {
                 Text(if (ui.scan.isEmpty()) "Not scanned yet" else "${ui.scan.size} units • $faults faults",
                     style = MaterialTheme.typography.bodyMedium, color = OnMuted)
             }
+            val live = ui.connected || ui.replaying
             FilledTonalButton(onClick = onClearAll, enabled = ui.connected && !ui.busy) {
                 Icon(Icons.Filled.DeleteSweep, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Clear")
             }
             Spacer(Modifier.width(8.dp))
-            Button(onClick = onScan, enabled = ui.connected && !ui.busy) {
+            Button(onClick = onScan, enabled = live && !ui.busy) {
                 Icon(Icons.Filled.Search, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Scan")
             }
         }

@@ -78,12 +78,14 @@ class MainActivity : ComponentActivity() {
         if (tmp.exists() && tmp.length() > 0) vm.replay(tmp) else toast("Could not read the trace file")
     }
 
-    private fun shareReport(path: String) {
-        if (path.isEmpty() || !File(path).exists()) { toast("Scan the car first to make a report"); return }
-        val uri = androidx.core.content.FileProvider.getUriForFile(this, "$packageName.files", File(path))
-        val send = Intent(Intent.ACTION_SEND).setType("text/html")
-            .putExtra(Intent.EXTRA_STREAM, uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        startActivity(Intent.createChooser(send, "Share report"))
+    private fun shareReport(htmlPath: String) {
+        if (htmlPath.isEmpty() || !File(htmlPath).exists()) { toast("Scan the car first to make a report"); return }
+        val files = listOf(File(htmlPath), File(htmlPath.removeSuffix(".html") + ".txt")).filter { it.exists() }
+        val uris = ArrayList(files.map { androidx.core.content.FileProvider.getUriForFile(this, "$packageName.files", it) })
+        val send = Intent(Intent.ACTION_SEND_MULTIPLE).setType("*/*")
+            .putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        startActivity(Intent.createChooser(send, "Share report (HTML + text)"))
     }
 
     override fun onDestroy() { super.onDestroy(); runCatching { unregisterReceiver(usbReceiver) } }

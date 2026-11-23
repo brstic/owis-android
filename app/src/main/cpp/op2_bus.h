@@ -29,13 +29,37 @@ class Op2Bus : public Bus, public RawCan {
     UsbPipe usb;
     IsoTp iso{*this};
     Tp20 tp{*this};
-    uint32_t dev = 0, chan = 0, filt = 0;
-    bool opened = false;
+    uint32_t dev = 0, chan = 0, filt = 0, kchan = 0, kfilt = 0;
+    bool opened = false, kOpen = false, kUp = false;
 
-    // J2534-1 04.04 constants (not named in the library header).
-    enum { J_CAN = 5, J_PASS_FILTER = 1, J_CAN_29BIT_ID = 0x100, J_TX_MSG_TYPE = 0x01 };
+    // J2534-1 04.04 constants (the library header names CAN/ISO14230/PASS_FILTER/FAST_INIT/CLEAR_RX_BUFFER).
+    enum { J_CAN = CAN, J_ISO14230 = ISO14230, J_PASS_FILTER = PASS_FILTER, J_CAN_29BIT_ID = 0x100,
+           J_TX_MSG_TYPE = 0x01, J_START_OF_MESSAGE = 0x02 };
     static void putId(PASSTHRU_MSG &m, uint32_t id) {
         m.Data[0] = (id >> 24) & 0xFF; m.Data[1] = (id >> 16) & 0xFF; m.Data[2] = (id >> 8) & 0xFF; m.Data[3] = id & 0xFF;
+    }
+
+    // K-line (ISO 14230 / KWP2000) for the older cars, mirroring the desktop J2534 path. The OpenPort 2.0 library
+    // currently stubs the fast-init ioctl, so this is wired but unconfirmed — the same maturity as the desktop,
+    // whose K-line is also pending on-car confirmation.
+    bool kOpenChannel() {
+        if (kOpen) return true;
+        if (PassThruConnect(dev, J_ISO14230, 0, 10400, &kchan) != STATUS_NOERROR) {
+            error("[ERROR] the adapter cannot open the K-line (ISO 14230)."); return false;
+        }
+        PASSTHRU_MSG mask, patt; memset(&mask, 0, sizeof mask); memset(&patt, 0, sizeof patt);
+        mask.ProtocolID = patt.ProtocolID = J_ISO14230; mask.DataSize = patt.DataSize = 1;
+        PassThruStartMsgFilter(kchan, J_PASS_FILTER, &mask, &patt, nullptr, &kfilt);
+        kOpen = true; return true;
+    }
+    void kInit() {
+        PassThruIoctl(kchan, CLEAR_RX_BUFFER, nullptr, nullptr);
+        PASSTHRU_MSG in, out; memset(&in, 0, sizeof in); memset(&out, 0, sizeof out);
+        in.ProtocolID = out.ProtocolID = J_ISO14230;
+        in.Data[0] = 0x81; in.Data[1] = (uint8_t)txId; in.Data[2] = (uint8_t)rxId; in.Data[3] = 0x81; in.DataSize = 4;
+        int32_t rc = PassThruIoctl(kchan, FAST_INIT, &in, &out);
+        if (rc != STATUS_NOERROR) error("[K-line] this adapter/library does not do the fast-init itself; trying anyway.");
+        kUp = true;   // best effort: attempt the exchange even if the library stubbed the init
     }
 
 public:
@@ -58,6 +82,7 @@ public:
     }
     void close() override {
         if (tp.connected()) tp.close();
+        if (kOpen) { PassThruDisconnect(kchan); kOpen = kUp = false; }
         if (opened) { PassThruDisconnect(chan); PassThruClose(dev); opened = false; }
         op2ActivePipe() = nullptr;
     }
@@ -97,18 +122,41 @@ public:
     bool target(uint32_t tx, uint32_t rx, int linkKind = LINK_CAN) override {
         if (tp.connected() && (linkKind != LINK_TP20 || tx != tp.address())) tp.close();
         Bus::target(tx, rx, linkKind);
+        if (linkKind == LINK_KLINE) { if (!kOpenChannel()) return false; kInit(); return true; }
         if (linkKind == LINK_TP20) { if (!tp.connected()) tp.open((uint8_t)tx); }
         else iso.setIds(tx, rx);
         return opened;
     }
     bool sendRaw(const std::vector<uint8_t> &p) override {
         if (kind == LINK_TP20) { tp.keepAlive(); return tp.sendMessage(p); }
-        if (kind == LINK_KLINE) return false;                       // OpenPort 2.0 K-line init is not supported
+        if (kind == LINK_KLINE) {
+            if (!kUp || p.size() > 255) return false;
+            PASSTHRU_MSG m; memset(&m, 0, sizeof m); m.ProtocolID = J_ISO14230; size_t h = 0;
+            if (p.size() < 64) { m.Data[h++] = (uint8_t)(0x80 | p.size()); m.Data[h++] = (uint8_t)txId; m.Data[h++] = (uint8_t)rxId; }
+            else { m.Data[h++] = 0x80; m.Data[h++] = (uint8_t)txId; m.Data[h++] = (uint8_t)rxId; m.Data[h++] = (uint8_t)p.size(); }
+            memcpy(m.Data + h, p.data(), p.size()); m.DataSize = (uint32_t)(h + p.size());
+            uint32_t num = 1; return PassThruWriteMsgs(kchan, &m, &num, 1000) == STATUS_NOERROR;   // adapter appends the checksum
+        }
         return iso.send(p);
     }
     bool recvRaw(std::vector<uint8_t> &out, unsigned timeoutMs) override {
         if (kind == LINK_TP20) return tp.recvMessage(out, timeoutMs);
-        if (kind == LINK_KLINE) return false;
+        if (kind == LINK_KLINE) {
+            uint32_t t0 = nowMs();
+            while (nowMs() - t0 < timeoutMs) {
+                PASSTHRU_MSG m; memset(&m, 0, sizeof m); uint32_t num = 1;
+                if (PassThruReadMsgs(kchan, &m, &num, 50) != STATUS_NOERROR || num == 0) continue;
+                if (m.RxStatus & (J_TX_MSG_TYPE | J_START_OF_MESSAGE)) continue;
+                if (m.DataSize < 2) continue;
+                size_t h = 1; uint8_t fmt = m.Data[0]; size_t len = fmt & 0x3F;
+                if (fmt & 0x80) { if (m.DataSize < 4) continue; if (m.Data[1] != (uint8_t)rxId || m.Data[2] != (uint8_t)txId) continue; h = 3; }
+                if (len == 0) { if (m.DataSize <= h) continue; len = m.Data[h++]; }
+                if (len == 0 || h + len > m.DataSize) continue;
+                out.assign(m.Data + h, m.Data + h + len);
+                return true;
+            }
+            return false;
+        }
         return iso.recv(out, timeoutMs);
     }
 };
