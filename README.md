@@ -1,0 +1,97 @@
+<p align="center">
+  <img src="assets/owis-banner.png" alt="OWIS" width="100%">
+</p>
+
+<h1 align="center">OWIS for Android</h1>
+
+<p align="center">
+  <b>Open Workshop Information System — Porsche diagnostics on your phone.</b><br>
+  The same engine as desktop <a href="https://github.com/brstic/owis">OWIS</a>, over a Tactrix OpenPort 2.0 and a USB-OTG cable.
+</p>
+
+<p align="center">
+  <img alt="platform" src="https://img.shields.io/badge/Android-8.0%2B-3DDC84">
+  <img alt="adapter" src="https://img.shields.io/badge/adapter-OpenPort%202.0-38E8B0">
+  <img alt="license" src="https://img.shields.io/badge/license-MIT-5BC8FF">
+</p>
+
+---
+
+> ⚠️ **Development preview — not yet confirmed on a car from the phone.** The desktop engine is confirmed on a real
+> Porsche; this app wraps that same engine over USB. Try it and report back with the session log.
+
+## What it is
+
+A native Android app that runs the **portable OWIS diagnostic engine** (the exact `src/*.h` from the desktop
+project, compiled with the NDK) and talks to the car through a **Tactrix OpenPort 2.0** plugged into the phone with a
+USB-OTG / USB-C cable. Everything the desktop tool does on the CAN bus, it does here:
+
+- **Scan** every control unit, read and **clear faults** with their freeze-frame data.
+- **Guided jobs**, one tap each: service reset, bleeding, calibrations, PDK teach-in, adaptation resets …
+- **Live data** with value tiles.
+- **Coding** — unlock with the unit's own seed/key algorithm (needs your `owis.keys`, see below).
+- UDS & KWP2000 over ISO-TP (11/29-bit CAN) and VW TP 2.0 for the units behind the gateway, all in user space on
+  top of raw CAN frames.
+
+13 Porsche lines, Panamera 970 to Taycan — the same coverage as desktop OWIS.
+
+## How it works
+
+```
+  Jetpack Compose UI  (Kotlin)
+          │
+   MainViewModel ──► Native (JNI)  ──►  libowis.so
+          │                               │  engine/*.h  (scan, jobs, coding, ISO-TP, TP 2.0)
+          │                               │  op2_bus.h   (OpenPort 2.0 transport)
+   Op2Usb (CDC-ACM) ◄───── USB bulk ──────┘  reads/writes raw CAN frames
+          │
+   USB-OTG → Tactrix OpenPort 2.0 → OBD → car
+```
+
+The engine is unchanged; the Android-specific parts are small and self-contained:
+
+- **`app/src/main/cpp/op2_bus.h`** — the OpenPort 2.0 transport. The OpenPort 2.0 is a USB CDC-ACM device that speaks
+  an ASCII command protocol (`ato`/`atf`/`att … <seq>`) and returns raw CAN frames; OWIS's own `isotp.h` / `tp20.h`
+  run on top. The protocol follows [roffe/libj2534_openport2](https://github.com/roffe/libj2534_openport2).
+- **`app/src/main/java/com/owis/diag/usb/Op2Usb.kt`** — opens the adapter over the Android USB host API (bulk
+  transfers on the CDC-data interface) and hands the bytes to native code.
+- **`owis_jni.cpp`** — the JNI bridge: the engine runs in native code, USB I/O and log/live callbacks cross back to
+  Kotlin.
+
+K-line (996 / 986 / 955) is not available over the OpenPort 2.0 yet — those cars need an adapter that does the K-line
+init. Everything on CAN works.
+
+## Vehicle data (and coding keys)
+
+Like desktop OWIS, the app **ships no vehicle data**. Build it once on a PC from your own licensed installation and
+copy it to the phone:
+
+1. On a PC, in the [OWIS](https://github.com/brstic/owis) repo, run `build_data.py` to produce the `data/` folder,
+   and `tools/seedkey` + `build_keyfile.py` to produce `owis.keys` (coding; optional).
+2. Copy the `*.json` packs and `owis.keys` into one folder on the phone.
+3. In the app, **Import data folder** and pick it (or push the files to
+   `Android/data/com.owis.diag/files/data/` directly).
+
+Without data, the app explains what to add; without `owis.keys`, everything except coding writes works.
+
+## Build
+
+Needs Android Studio (or the command-line tools) with **NDK 27** and **CMake 3.22**.
+
+```sh
+./gradlew :app:assembleDebug        # app/build/outputs/apk/debug/app-debug.apk
+```
+
+The engine headers under `app/src/main/cpp/engine/` are vendored from the desktop repo; refresh them with
+`tools/sync-engine.sh ../porsche-tool`.
+
+## Hardware
+
+- A **Tactrix OpenPort 2.0** (VID `0403`, PID `CC4B/CC4C/CC4D`).
+- A **USB-OTG** adapter/cable for your phone (USB-C or micro-USB host mode).
+- Ignition on, engine off, a battery charger recommended.
+
+---
+
+Not affiliated with or endorsed by Porsche AG; "Porsche" only names the compatible vehicles. Use at your own risk and
+follow the workshop manual. MIT license.

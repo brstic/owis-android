@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Tactrix OpenPort 2.0: VID 0x0403 (1027), PID CC4B/CC4C/CC4D (52299/52300/52301) -->
+<resources>
+    <usb-device vendor-id="1027" product-id="52299" />
+    <usb-device vendor-id="1027" product-id="52300" />
+    <usb-device vendor-id="1027" product-id="52301" />
+</resources>
